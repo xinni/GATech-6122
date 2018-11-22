@@ -4,12 +4,10 @@
 #include <stdlib.h>
 
 using namespace std;
-#define width 5
-#define height 10
+#define width 3
+#define height 3
+__device__ float k = 0.25;
 
-__device__ float k = 0.5;
-int timeSteps = 10;
-int N = width * height;
 float startingTemp = 0;
 // int DIM = 10;
 
@@ -17,11 +15,11 @@ float startingTemp = 0;
 // 500, 500, 10, 10, 300
 void setInitHeatMap(float *dst, char str[]) {
     // set 5, 5, 2, 2, 10
-    int location_x = 2;
-    int location_y = 4;
-    int widthFix= 4;
-    int heightFix = 2;
-    float fixedTemp = 10;
+    int location_x = 1;
+    int location_y = 1;
+    int widthFix= 1;
+    int heightFix = 1;
+    float fixedTemp = 5;
 
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
@@ -62,7 +60,10 @@ __global__ void update_2D_kernel (float *dst, float *src) {
             (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
 }
 
-int main (void) {
+int main (int argc, char *argv[]) {
+    int timeSteps = atoi(argv[1]);
+    int N = width * height;
+
     float fix[width * height] = {0};
     float current[width * height] = {0};
     float previous[width * height] = {0};
@@ -75,16 +76,27 @@ int main (void) {
     cudaMalloc((void**)&d_p, N * sizeof(float));
     cudaMalloc((void**)&d_i, N * sizeof(float));
 
-    dim3 blocks(1,1);
-    dim3 threads(5,10);
+    dim3 blocks(1, 1);
+    dim3 threads(3, 3);
 
     cudaMemcpy(d_i, fix, N*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_p, previous, N*sizeof(float), cudaMemcpyHostToDevice);
-    
-    copy_const_kernel<<<blocks, threads>>>(d_p, d_i);
-    update_2D_kernel<<<blocks, threads>>>(d_c, d_p);
 
-    cudaMemcpy(current, d_c, N*sizeof(int), cudaMemcpyDeviceToHost);
+    float *in, *out;
+    for (int i = 0; i <= timeSteps; i++) {
+        if (i % 2) {
+            in = d_c;
+            out = d_p;
+        } else {
+            in = d_p;
+            out = d_c;
+        }
+        
+        update_2D_kernel<<<blocks, threads>>>(out, in);
+        copy_const_kernel<<<blocks, threads>>>(out, d_i);
+    }
+
+    cudaMemcpy(current, out, N*sizeof(int), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < height * width; i++) {
         if (i % width != width - 1) {
