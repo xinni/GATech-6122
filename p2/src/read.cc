@@ -26,13 +26,14 @@ int main (int argc, char *argv[]) {
     float k, startTemp, *fix;
     int timeSteps, width, height, depth = 0;
     
-    /*********************** read the config file *************************/
+    /*****************************************************************/
+    // read the config file
     ifstream infile("sample.conf");
     string line;
     int index = 0;
     while (getline(infile, line)) {
 
-        // read non# and empty line set index as line number.
+        // read non # and empty line set index as line number.
         int found= line.find_first_not_of(" \t");
         if(found != string::npos) {
             if(line[found] == '#') continue;
@@ -83,6 +84,7 @@ int main (int argc, char *argv[]) {
         }
         index++;
     }
+
     /*****************************************************************/
 
 

@@ -1,37 +1,111 @@
 #include <stdio.h>
-                                                                                                                                         
-#define N 1029 
-#define T_P_B 512
+#include <iostream>
+#include <string>
+#include <stdlib.h>
+#include <sstream>
+#include <fstream>
 
-__global__ void double_it(int *a, int *b, int n) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    if(idx < n) {
-        b[idx] = 2 * a[idx];
+using namespace std;
+
+#define width 3
+#define height 3
+__device__ float k = 0.25;
+
+float startingTemp = 0;
+// int DIM = 10;
+
+// set fix mat
+void setInitHeatMap2D(float *dst, int width, int height, int location_x, int location_y, int widthFix, int heightFix, int fixedTemp) {
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            if ((i >= location_y) && (i < location_y + heightFix)) {
+                if ((j >= location_x) && (j < location_x + widthFix)){
+                    dst[i * width + j] = fixedTemp;
+                }
+            }
+        }
     }
 }
 
-int main() {
-    int *d_a, *d_b;
+__global__ void copy_const_kernel (float *dst, const float *src) {
+    // map from threadIdx/BlockIdx to pixel position
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * blockDim.x * gridDim.x;
 
-    cudaMalloc((void**)&d_a, N*sizeof(N));
-    cudaMalloc((void**)&d_b, N*sizeof(N));
- 
-    int a[N], b[N];
+    if (src[index] != 0) dst[index] = src[index];
+}
 
-    for(int i = 0; i < N; ++i) {
-        a[i] = i;
-    }
- 
-    cudaMemcpy(d_a, a, N*sizeof(int), cudaMemcpyHostToDevice);
- 
-    double_it<<<(N + T_P_B-1) / T_P_B, T_P_B>>>(d_a, d_b, N);
- 
-    cudaMemcpy(b, d_b, N*sizeof(int), cudaMemcpyDeviceToHost);
+__global__ void update_2D_kernel (float *dst, float *src) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * blockDim.x * gridDim.x;
+
+    int left = index - 1;  
+    int right = index + 1;  
+    if (x == 0) left++;  
+    if (x == width-1) right--;
+  
+    int top = index - width;
+    int bottom = index + width;
+    if (y == 0) top += width;
+    if (y == width - 1) bottom -= width;
+  
+    dst[index] = src[index] + k * 
+            (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
+}
+
+int main (int argc, char *argv[]) {
+    int timeSteps = atoi(argv[1]);
+    int N = width * height;
+
     
-    for(int i = 0; i < N; ++i) {
-        printf("%d x2 = %d\n", a[i], b[i]);
+
+    float fix[width * height] = {0};
+    float current[width * height] = {0};
+    float previous[width * height] = {0};
+
+    float *d_c, *d_p, *d_i;
+
+    setInitHeatMap(fix, "500, 500, 10, 10, 300");
+
+    cudaMalloc((void**)&d_c, N * sizeof(float));
+    cudaMalloc((void**)&d_p, N * sizeof(float));
+    cudaMalloc((void**)&d_i, N * sizeof(float));
+
+    dim3 blocks(1, 1);
+    dim3 threads(3, 3);
+
+    cudaMemcpy(d_i, fix, N*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_p, previous, N*sizeof(float), cudaMemcpyHostToDevice);
+
+    float *in, *out;
+    for (int i = 0; i <= timeSteps; i++) {
+        if (i % 2) {
+            in = d_c;
+            out = d_p;
+        } else {
+            in = d_p;
+            out = d_c;
+        }
+        
+        update_2D_kernel<<<blocks, threads>>>(out, in);
+        copy_const_kernel<<<blocks, threads>>>(out, d_i);
     }
- 
-    cudaFree(d_a);
-    cudaFree(d_b);
- }
+
+    cudaMemcpy(current, out, N*sizeof(int), cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < height * width; i++) {
+        if (i % width != width - 1) {
+            cout << current[i] << ", ";
+        } else {
+            cout << current[i] << endl;
+        }
+    }
+
+    cudaFree(d_p);
+    cudaFree(d_c);
+    cudaFree(d_i);
+
+    return 1;
+}
