@@ -40,21 +40,23 @@ void setInitHeatMap2D(float *dst, int width, int height, int location_x, int loc
 }
 
 /*************** copy src mat to dst mat **********************/
-__global__ void copy_const_kernel (float *dst, const float *src, int N) {
+__global__ void copy_const_kernel (float *dst, const float *src, int width, int height) {
     // x as width, y as height
     // map from threadIdx/BlockIdx to pixel position
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
-    int index = x + y * blockDim.x * gridDim.x;
+    // int index = x + y * blockDim.x * gridDim.x;
+    int index = x + y * width;
 
-    if ((index < N) && (src[index] != 0)) dst[index] = src[index];
+    if ((x < width && y < height) && (src[index] != 0)) dst[index] = src[index];
 }
 
 /*************** 2D temp update function **********************/
-__global__ void update_2D_kernel (float *dst, float *src, int width, int height, float k, int N) {
+__global__ void update_2D_kernel (float *dst, float *src, int width, int height, float k) {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
-    int index = x + y * blockDim.x * gridDim.x;
+    // int index = x + y * blockDim.x * gridDim.x;
+    int index = x + y * width;
 
     int left = index - 1;  
     int right = index + 1;  
@@ -66,7 +68,7 @@ __global__ void update_2D_kernel (float *dst, float *src, int width, int height,
     if (y == 0) top += width;
     if (y == height - 1) bottom -= width;
   
-    if (index < N) {
+    if (x < width && y < height) {
         dst[index] = src[index] + k * 
             (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
     }
@@ -149,9 +151,9 @@ int main (void) {
     cudaMalloc((void**)&data.d_pre, N * sizeof(float));
     cudaMalloc((void**)&data.d_fix, N * sizeof(float));
 
-    //dim3 blocks((width + DIM - 1) / DIM, (height + DIM - 1) / DIM, (depth + DIM - 1) / DIM);
-    dim3 blocks(1, 1, 1);
-    dim3 threads(4, 5, DIM);
+    dim3 blocks((width + DIM - 1) / DIM, (height + DIM - 1) / DIM, (depth + DIM - 1) / DIM);
+    //dim3 blocks(1, 1, 1);
+    dim3 threads(DIM, DIM, DIM);
 
     cudaMemcpy(data.d_fix, fix, N*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(data.d_pre, previous, N*sizeof(float), cudaMemcpyHostToDevice);
@@ -165,11 +167,12 @@ int main (void) {
             data.out = data.d_cur;
         }
         
-        update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k, N);
-        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, N);
+        update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k);
+        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height);
     }
 
     cudaMemcpy(current, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(output, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
 
     // cout << dim2D << endl;
     cout << k << endl;
