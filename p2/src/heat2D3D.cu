@@ -15,7 +15,6 @@ struct DeviceData {
     float *d_pre;
     float *in;
     float *out;
-    // bool d_dim2D;
 };
 
 void cleanup(DeviceData *d ) {
@@ -24,15 +23,30 @@ void cleanup(DeviceData *d ) {
     cudaFree(d->d_pre);
     cudaFree(d->in);
     cudaFree(d->out);
-    // cudaFree(d->d_dim2D);
 }
 
-void setInitHeatMap2D(float *dst, int width, int height, int location_x, int location_y, int widthFix, int heightFix, int fixedTemp) {
+void setInitHeatMap(float *dst, int width, int height, int location_x, int location_y, int widthFix, int heightFix, int fixedTemp) {
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             if ((i >= location_y) && (i < location_y + heightFix)) {
                 if ((j >= location_x) && (j < location_x + widthFix)){
                     dst[i * width + j] = fixedTemp;
+                }
+            }
+        }
+    }
+}
+
+void setInitHeatMap(float *dst, int width, int height, int depth, int location_x, int location_y, int location_z, int widthFix, int heightFix, int depthFix, int fixedTemp) {
+    for (int k = 0; k < depth; k++) {
+        for (int i = 0; i < height; i++) {
+            for (int j = 0; j < width; j++) {
+                if ((k >= location_z) && (k < location_z + depthFix)) {
+                    if ((i >= location_y) && (i < location_y + heightFix)) {
+                        if ((j >= location_x) && (j < location_x + widthFix)){
+                            dst[k * width * height + i * width + j] = fixedTemp;
+                        }
+                    }
                 }
             }
         }
@@ -49,6 +63,46 @@ __global__ void copy_const_kernel (float *dst, const float *src, int width, int 
     int index = x + y * width;
 
     if ((x < width && y < height) && (src[index] != 0)) dst[index] = src[index];
+}
+
+__global__ void copy_const_kernel (float *dst, const float *src, int width, int height, int depth) {
+    // x as width, y as height, z as depth
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int z = threadIdx.z + blockIdx.z * blockDim.z;
+
+    int index = x + y * width + z * width * height;
+
+    if ((x < width && y < height && z < depth) && (src[index] != 0)) dst[index] = src[index];
+}
+
+/*************** 3D temp update function **********************/
+__global__ void update_3D_kernel (float *dst, float *src, int width, int height, int depth, float k) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int z = threadIdx.z + blockIdx.z * blockDim.z;
+    // int index = x + y * blockDim.x * gridDim.x;
+    int index = x + y * width + z * width * height;
+
+    int left = index - 1;  
+    int right = index + 1;  
+    if (x == 0) left++;  
+    if (x == width - 1) right--;
+  
+    int top = index - width;
+    int bottom = index + width;
+    if (y == 0) top += width;
+    if (y == height - 1) bottom -= width;
+
+    int front = index - width * height;
+    int back = index + width * height;
+    if (z == 0) front += width * height;
+    if (z == depth - 1) back -= width * height;
+  
+    if (x < width && y < height) {
+        dst[index] = src[index] + k * 
+            (src[top] + src[bottom] + src[left] + src[right] + src[front] + src[back] - src[index] * 6);
+    }
 }
 
 /*************** 2D temp update function **********************/
@@ -132,11 +186,15 @@ int main (void) {
             if (dim2D) {
                 int _x, _y, wf, hf;
                 float tf;
-                if (!(iss >> _x >> comma >> _y >> comma >> wf >> comma >> hf >> comma >> tf) || (comma != ',')) break;
-                setInitHeatMap2D(fix, width, height, _x, _y, wf, hf, tf);
+                if (!(iss >> _x >> comma >> _y >> comma >> wf >> comma >> hf >> 
+                    comma >> tf) || (comma != ',')) break;
+                setInitHeatMap(fix, width, height, _x, _y, wf, hf, tf);
             } else {
-
-                // TODO: finish 3D temp distrabute
+                int _x, _y, _z, wf, hf, df;
+                float tf;
+                if (!(iss >> _x >> comma >> _y >> comma >> _z >> comma >> wf >> comma >> hf >> 
+                    comma >> df >> comma >> tf) || (comma != ',')) break;
+                setInitHeatMap(fix, width, height, depth, _x, _y, _z, wf, hf, df, tf);
             }
         }
         index++;
@@ -166,28 +224,51 @@ int main (void) {
             data.in = data.d_pre;
             data.out = data.d_cur;
         }
+        if (dim2D) {
+            update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k);
+            copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height);
+        } else {
+            update_3D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, depth, k);
+            copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height, depth);
+        }
         
-        update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k);
-        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height);
     }
 
     cudaMemcpy(current, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
     // cudaMemcpy(output, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
 
     // cout << dim2D << endl;
-    cout << k << endl;
-    cout << timeSteps << endl;
+    // cout << k << endl;
+    // cout << timeSteps << endl;
     // cout << "w = " << width << " h = " << height << " d = " << depth << endl;
-    cout << startTemp << endl;
+    // cout << startTemp << endl;
 
-    for (int i = 0; i < N; i++) {
-        if (i % width != width - 1) {
-            cout << current[i] << ", ";
-        } else {
-            cout << current[i] << endl;
+    if (dim2D) { // print out 2D result
+        for (int i = 0; i < N; i++) {
+            if (i % width != width - 1) {
+                cout << current[i] << ", ";
+            } else {
+                cout << current[i] << endl;
+            }
+        }
+    } else { // print out 3D result
+        for (int i = 0; i < N; i++) {
+            if (i % (width * height) != width * height - 1) {
+                if (i % width != width - 1) {
+                    cout << current[i] << ", ";
+                } else {
+                    cout << current[i] << endl;
+                }
+            } else {
+                if (i == N - 1) {
+                    cout << current[i] << endl;
+                } else {
+                    cout << current[i] << endl << endl;
+                }
+            }
         }
     }
-
+    
     cleanup(&data);
 
     return 1;
