@@ -5,6 +5,8 @@
 #include <sstream>
 #include <fstream>
 
+#define DIM 8
+
 using namespace std;
 
 struct DeviceData {
@@ -38,18 +40,18 @@ void setInitHeatMap2D(float *dst, int width, int height, int location_x, int loc
 }
 
 /*************** copy src mat to dst mat **********************/
-__global__ void copy_const_kernel (float *dst, const float *src) {
+__global__ void copy_const_kernel (float *dst, const float *src, int N) {
     // x as width, y as height
     // map from threadIdx/BlockIdx to pixel position
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
     int index = x + y * blockDim.x * gridDim.x;
 
-    if (src[index] != 0) dst[index] = src[index];
+    if ((index < N) && (src[index] != 0)) dst[index] = src[index];
 }
 
 /*************** 2D temp update function **********************/
-__global__ void update_2D_kernel (float *dst, float *src, int width, int height, float k) {
+__global__ void update_2D_kernel (float *dst, float *src, int width, int height, float k, int N) {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
     int index = x + y * blockDim.x * gridDim.x;
@@ -57,15 +59,17 @@ __global__ void update_2D_kernel (float *dst, float *src, int width, int height,
     int left = index - 1;  
     int right = index + 1;  
     if (x == 0) left++;  
-    if (x == width-1) right--;
+    if (x == width - 1) right--;
   
     int top = index - width;
     int bottom = index + width;
     if (y == 0) top += width;
     if (y == height - 1) bottom -= width;
   
-    dst[index] = src[index] + k * 
+    if (index < N) {
+        dst[index] = src[index] + k * 
             (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
+    }
 }
 
 int main (void) {
@@ -74,7 +78,7 @@ int main (void) {
     // set all value
     bool dim2D = true; // true as 2D, false as 3D, default as 2D
     float k, startTemp, *fix;
-    int timeSteps, N, width, height, depth = 0;
+    int timeSteps, N, width, height, depth = 1;
     
     /*********************** read the config file *************************/
     ifstream infile("sample.conf");
@@ -145,8 +149,9 @@ int main (void) {
     cudaMalloc((void**)&data.d_pre, N * sizeof(float));
     cudaMalloc((void**)&data.d_fix, N * sizeof(float));
 
-    dim3 blocks(1, 1);
-    dim3 threads(4, 5);
+    //dim3 blocks((width + DIM - 1) / DIM, (height + DIM - 1) / DIM, (depth + DIM - 1) / DIM);
+    dim3 blocks(1, 1, 1);
+    dim3 threads(4, 5, DIM);
 
     cudaMemcpy(data.d_fix, fix, N*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(data.d_pre, previous, N*sizeof(float), cudaMemcpyHostToDevice);
@@ -160,8 +165,8 @@ int main (void) {
             data.out = data.d_cur;
         }
         
-        update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k);
-        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix);
+        update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k, N);
+        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, N);
     }
 
     cudaMemcpy(current, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
@@ -172,7 +177,7 @@ int main (void) {
     // cout << "w = " << width << " h = " << height << " d = " << depth << endl;
     cout << startTemp << endl;
 
-    for (int i = 0; i < height * width; i++) {
+    for (int i = 0; i < N; i++) {
         if (i % width != width - 1) {
             cout << current[i] << ", ";
         } else {
