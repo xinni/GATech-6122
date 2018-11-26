@@ -8,28 +8,20 @@
 using namespace std;
 
 struct DeviceData {
-    float d_k;
-    int d_timeSteps;
-    int d_width;
-    int d_height;
-    int d_depth;
-    float d_startTemp;
     float *d_fix;
     float *d_cur;
     float *d_pre;
-    bool d_dim2D;
+    float *in;
+    float *out;
+    // bool d_dim2D;
 };
 
 void cleanup(DeviceData *d ) {
-    // cudaFree(d->d_k);
-    // cudaFree(d->d_timeSteps);
-    // cudaFree(d->d_width);
-    // cudaFree(d->d_height);
-    // cudaFree(d->d_depth);
-    // cudaFree(d->d_startTemp);
     cudaFree(d->d_fix);
     cudaFree(d->d_cur);
     cudaFree(d->d_pre);
+    cudaFree(d->in);
+    cudaFree(d->out);
     // cudaFree(d->d_dim2D);
 }
 
@@ -47,6 +39,7 @@ void setInitHeatMap2D(float *dst, int width, int height, int location_x, int loc
 
 /*************** copy src mat to dst mat **********************/
 __global__ void copy_const_kernel (float *dst, const float *src) {
+    // x as width, y as height
     // map from threadIdx/BlockIdx to pixel position
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -56,7 +49,7 @@ __global__ void copy_const_kernel (float *dst, const float *src) {
 }
 
 /*************** 2D temp update function **********************/
-__global__ void update_2D_kernel (float *dst, float *src, int width, float k) {
+__global__ void update_2D_kernel (float *dst, float *src, int width, int height, float k) {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
     int index = x + y * blockDim.x * gridDim.x;
@@ -69,7 +62,7 @@ __global__ void update_2D_kernel (float *dst, float *src, int width, float k) {
     int top = index - width;
     int bottom = index + width;
     if (y == 0) top += width;
-    if (y == width - 1) bottom -= width;
+    if (y == height - 1) bottom -= width;
   
     dst[index] = src[index] + k * 
             (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
@@ -144,12 +137,34 @@ int main (void) {
     }
     /*****************************************************************/
 
-    // TODO: new fix, current, previous
+    float previous[N];
+    float current[N] = {0};
+    fill_n(previous, N, startTemp);
 
     cudaMalloc((void**)&data.d_cur, N * sizeof(float));
     cudaMalloc((void**)&data.d_pre, N * sizeof(float));
     cudaMalloc((void**)&data.d_fix, N * sizeof(float));
 
+    dim3 blocks(1, 1);
+    dim3 threads(4, 5);
+
+    cudaMemcpy(data.d_fix, fix, N*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(data.d_pre, previous, N*sizeof(float), cudaMemcpyHostToDevice);
+
+    for (int i = 0; i <= timeSteps; i++) {
+        if (i % 2) {
+            data.in = data.d_cur;
+            data.out = data.d_pre;
+        } else {
+            data.in = data.d_pre;
+            data.out = data.d_cur;
+        }
+        
+        update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k);
+        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix);
+    }
+
+    cudaMemcpy(current, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
 
     // cout << dim2D << endl;
     cout << k << endl;
@@ -159,9 +174,9 @@ int main (void) {
 
     for (int i = 0; i < height * width; i++) {
         if (i % width != width - 1) {
-            cout << fix[i] << ", ";
+            cout << current[i] << ", ";
         } else {
-            cout << fix[i] << endl;
+            cout << current[i] << endl;
         }
     }
 
