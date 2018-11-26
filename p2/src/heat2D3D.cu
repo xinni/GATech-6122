@@ -7,6 +7,32 @@
 
 using namespace std;
 
+struct DeviceData {
+    float d_k;
+    int d_timeSteps;
+    int d_width;
+    int d_height;
+    int d_depth;
+    float d_startTemp;
+    float *d_fix;
+    float *d_cur;
+    float *d_pre;
+    bool d_dim2D;
+};
+
+void cleanup(DeviceData *d ) {
+    // cudaFree(d->d_k);
+    // cudaFree(d->d_timeSteps);
+    // cudaFree(d->d_width);
+    // cudaFree(d->d_height);
+    // cudaFree(d->d_depth);
+    // cudaFree(d->d_startTemp);
+    cudaFree(d->d_fix);
+    cudaFree(d->d_cur);
+    cudaFree(d->d_pre);
+    // cudaFree(d->d_dim2D);
+}
+
 void setInitHeatMap2D(float *dst, int width, int height, int location_x, int location_y, int widthFix, int heightFix, int fixedTemp) {
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
@@ -19,12 +45,43 @@ void setInitHeatMap2D(float *dst, int width, int height, int location_x, int loc
     }
 }
 
-int main (int argc, char *argv[]) {
-    
+/*************** copy src mat to dst mat **********************/
+__global__ void copy_const_kernel (float *dst, const float *src) {
+    // map from threadIdx/BlockIdx to pixel position
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * blockDim.x * gridDim.x;
+
+    if (src[index] != 0) dst[index] = src[index];
+}
+
+/*************** 2D temp update function **********************/
+__global__ void update_2D_kernel (float *dst, float *src, int width, float k) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * blockDim.x * gridDim.x;
+
+    int left = index - 1;  
+    int right = index + 1;  
+    if (x == 0) left++;  
+    if (x == width-1) right--;
+  
+    int top = index - width;
+    int bottom = index + width;
+    if (y == 0) top += width;
+    if (y == width - 1) bottom -= width;
+  
+    dst[index] = src[index] + k * 
+            (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
+}
+
+int main (void) {
+    DeviceData data;
+
     // set all value
     bool dim2D = true; // true as 2D, false as 3D, default as 2D
     float k, startTemp, *fix;
-    int timeSteps, width, height, depth = 0;
+    int timeSteps, N, width, height, depth = 0;
     
     /*********************** read the config file *************************/
     ifstream infile("sample.conf");
@@ -59,10 +116,12 @@ int main (int argc, char *argv[]) {
             // read dim, if 2D read width and height , 3D read w, h ,d
             if (dim2D) {
                 if (!(iss >> width >> comma >> height) || (comma != ',')) break;
-                fix = new float[width * height];
+                N = width * height;
+                fix = new float[N];
             } else {
                 if (!(iss >> width >> comma >> height >> comma >> depth) || (comma != ',')) break;
-                fix = new float[width * height * depth];
+                N = width * height * depth;
+                fix = new float[N];
             }
 
         } else if (index == 4) {
@@ -85,6 +144,12 @@ int main (int argc, char *argv[]) {
     }
     /*****************************************************************/
 
+    // TODO: new fix, current, previous
+
+    cudaMalloc((void**)&data.d_cur, N * sizeof(float));
+    cudaMalloc((void**)&data.d_pre, N * sizeof(float));
+    cudaMalloc((void**)&data.d_fix, N * sizeof(float));
+
 
     // cout << dim2D << endl;
     cout << k << endl;
@@ -99,6 +164,8 @@ int main (int argc, char *argv[]) {
             cout << fix[i] << endl;
         }
     }
+
+    cleanup(&data);
 
     return 1;
 }
