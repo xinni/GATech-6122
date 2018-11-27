@@ -96,10 +96,10 @@ __global__ void update_3D_kernel (float *dst, float *src, int width, int height,
 
     int front = index - width * height;
     int back = index + width * height;
-    if (z == 0) front += width * height;
-    if (z == depth - 1) back -= width * height;
+    if (z == 0) front = front + width * height;
+    if (z == depth - 1) back = back - width * height;
   
-    if (x < width && y < height) {
+    if (x < width && y < height && z < depth) {
         dst[index] = src[index] + k * 
             (src[top] + src[bottom] + src[left] + src[right] + src[front] + src[back] - src[index] * 6);
     }
@@ -171,10 +171,12 @@ int main (void) {
                 if (!(iss >> width >> comma >> height) || (comma != ',')) break;
                 N = width * height;
                 fix = new float[N];
+                fill_n(fix, N, 0);
             } else {
                 if (!(iss >> width >> comma >> height >> comma >> depth) || (comma != ',')) break;
                 N = width * height * depth;
                 fix = new float[N];
+                fill_n(fix, N, 0);
             }
 
         } else if (index == 4) {
@@ -210,7 +212,6 @@ int main (void) {
     cudaMalloc((void**)&data.d_fix, N * sizeof(float));
 
     dim3 blocks((width + DIM - 1) / DIM, (height + DIM - 1) / DIM, (depth + DIM - 1) / DIM);
-    //dim3 blocks(1, 1, 1);
     dim3 threads(DIM, DIM, DIM);
 
     cudaMemcpy(data.d_fix, fix, N*sizeof(float), cudaMemcpyHostToDevice);
@@ -235,39 +236,37 @@ int main (void) {
     }
 
     cudaMemcpy(current, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
-    // cudaMemcpy(output, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
 
-    // cout << dim2D << endl;
-    // cout << k << endl;
-    // cout << timeSteps << endl;
-    // cout << "w = " << width << " h = " << height << " d = " << depth << endl;
-    // cout << startTemp << endl;
-
+    // Generate the heat1Doutput.csv output file.
+	ofstream outFile;
+	outFile.open("heatDoutput.csv", ios::out);
     if (dim2D) { // print out 2D result
         for (int i = 0; i < N; i++) {
             if (i % width != width - 1) {
-                cout << current[i] << ", ";
+                outFile << current[i] << ", ";
             } else {
-                cout << current[i] << endl;
+                outFile << current[i] << endl;
             }
         }
     } else { // print out 3D result
         for (int i = 0; i < N; i++) {
             if (i % (width * height) != width * height - 1) {
                 if (i % width != width - 1) {
-                    cout << current[i] << ", ";
+                    outFile << current[i] << ", ";
                 } else {
-                    cout << current[i] << endl;
+                    outFile << current[i] << endl;
                 }
             } else {
                 if (i == N - 1) {
-                    cout << current[i] << endl;
+                    outFile << current[i] << endl;
                 } else {
-                    cout << current[i] << endl << endl;
+                    outFile << current[i] << endl << endl;
                 }
             }
         }
     }
+
+    cout << "finished" << endl;
     
     cleanup(&data);
 
