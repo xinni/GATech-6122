@@ -56,18 +56,6 @@ void setInitHeatMap(float *dst, int width, int height, int depth, int location_x
 }
 
 /*************** copy src mat to dst mat **********************/
-__global__ void copy_const_kernel (float *dst, const float *src, int width, int height) {
-    // x as width, y as height
-    // map from threadIdx/BlockIdx to pixel position
-    int x = threadIdx.x + blockIdx.x * blockDim.x;
-    int y = threadIdx.y + blockIdx.y * blockDim.y;
-    // int index = x + y * blockDim.x * gridDim.x;
-    int index = x + y * width;
-
-    if ((x < width && y < height) && (src[index] != 0)) dst[index] = src[index];
-}
-
-// Overload for 3D
 __global__ void copy_const_kernel (float *dst, const float *src, int width, int height, int depth) {
     // x as width, y as height, z as depth
     int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -79,8 +67,8 @@ __global__ void copy_const_kernel (float *dst, const float *src, int width, int 
     if ((x < width && y < height && z < depth) && (src[index] != 0)) dst[index] = src[index];
 }
 
-/*************** 3D temp update function **********************/
-__global__ void update_3D_kernel (float *dst, float *src, int width, int height, int depth, float k) {
+/*************** temp update function **********************/
+__global__ void update_kernel (float *dst, float *src, int width, int height, int depth, float k) {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
     int z = threadIdx.z + blockIdx.z * blockDim.z;
@@ -105,29 +93,6 @@ __global__ void update_3D_kernel (float *dst, float *src, int width, int height,
     if (x < width && y < height && z < depth) {
         dst[index] = src[index] + k * 
             (src[top] + src[bottom] + src[left] + src[right] + src[front] + src[back] - src[index] * 6);
-    }
-}
-
-/*************** 2D temp update function **********************/
-__global__ void update_2D_kernel (float *dst, float *src, int width, int height, float k) {
-    int x = threadIdx.x + blockIdx.x * blockDim.x;
-    int y = threadIdx.y + blockIdx.y * blockDim.y;
-    // int index = x + y * blockDim.x * gridDim.x;
-    int index = x + y * width;
-
-    int left = index - 1;  
-    int right = index + 1;  
-    if (x == 0) left++;  
-    if (x == width - 1) right--;
-  
-    int top = index - width;
-    int bottom = index + width;
-    if (y == 0) top += width;
-    if (y == height - 1) bottom -= width;
-  
-    if (x < width && y < height) {
-        dst[index] = src[index] + k * 
-            (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
     }
 }
 
@@ -172,15 +137,13 @@ int main (int argc, char *argv[]) {
             // read dim, if 2D read width and height , 3D read w, h ,d
             if (dim2D) {
                 if (!(iss >> width >> comma >> height) || (comma != ',')) break;
-                N = width * height;
-                fix = new float[N];
-                fill_n(fix, N, 0);
+                
             } else {
                 if (!(iss >> width >> comma >> height >> comma >> depth) || (comma != ',')) break;
-                N = width * height * depth;
-                fix = new float[N];
-                fill_n(fix, N, 0);
             }
+            N = width * height * depth;
+            fix = new float[N];
+            fill_n(fix, N, 0);
 
         } else if (index == 4) {
             // read start temp
@@ -228,14 +191,9 @@ int main (int argc, char *argv[]) {
             data.in = data.d_pre;
             data.out = data.d_cur;
         }
-        if (dim2D) {
-            update_2D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, k);
-            copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height);
-        } else {
-            update_3D_kernel<<<blocks, threads>>>(data.out, data.in, width, height, depth, k);
-            copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height, depth);
-        }
         
+        update_kernel<<<blocks, threads>>>(data.out, data.in, width, height, depth, k);
+        copy_const_kernel<<<blocks, threads>>>(data.out, data.d_fix, width, height, depth);
     }
 
     cudaMemcpy(current, data.out, N*sizeof(int), cudaMemcpyDeviceToHost);
@@ -243,33 +201,21 @@ int main (int argc, char *argv[]) {
     // Generate the heat1Doutput.csv output file.
 	ofstream outFile;
 	outFile.open("heatOutput.csv", ios::out);
-    if (dim2D) { // print out 2D result
-        for (int i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
+        if (i % (width * height) != width * height - 1) {
             if (i % width != width - 1) {
                 outFile << current[i] << ", ";
             } else {
                 outFile << current[i] << endl;
             }
-        }
-    } else { // print out 3D result
-        for (int i = 0; i < N; i++) {
-            if (i % (width * height) != width * height - 1) {
-                if (i % width != width - 1) {
-                    outFile << current[i] << ", ";
-                } else {
-                    outFile << current[i] << endl;
-                }
+        } else {
+            if (i == N - 1) {
+                outFile << current[i] << endl;
             } else {
-                if (i == N - 1) {
-                    outFile << current[i] << endl;
-                } else {
-                    outFile << current[i] << endl << endl;
-                }
+                outFile << current[i] << endl << endl;
             }
         }
     }
-
-    // cout << "finished" << endl;
     
     cleanup(&data);
 
