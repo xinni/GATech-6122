@@ -242,7 +242,7 @@ int main (int argc, char *argv[]) {
 
     // Generate the heat1Doutput.csv output file.
 	ofstream outFile;
-	outFile.open("heatDoutput.csv", ios::out);
+	outFile.open("heatOutput.csv", ios::out);
     if (dim2D) { // print out 2D result
         for (int i = 0; i < N; i++) {
             if (i % width != width - 1) {
