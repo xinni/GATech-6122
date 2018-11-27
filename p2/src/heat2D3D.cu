@@ -25,6 +25,7 @@ void cleanup(DeviceData *d ) {
     cudaFree(d->out);
 }
 
+/***************** Set fix value to fix matrix *********************/
 void setInitHeatMap(float *dst, int width, int height, int location_x, int location_y, int widthFix, int heightFix, int fixedTemp) {
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
@@ -37,6 +38,7 @@ void setInitHeatMap(float *dst, int width, int height, int location_x, int locat
     }
 }
 
+// Overload for 3D
 void setInitHeatMap(float *dst, int width, int height, int depth, int location_x, int location_y, int location_z, int widthFix, int heightFix, int depthFix, int fixedTemp) {
     for (int k = 0; k < depth; k++) {
         for (int i = 0; i < height; i++) {
@@ -65,6 +67,7 @@ __global__ void copy_const_kernel (float *dst, const float *src, int width, int 
     if ((x < width && y < height) && (src[index] != 0)) dst[index] = src[index];
 }
 
+// Overload for 3D
 __global__ void copy_const_kernel (float *dst, const float *src, int width, int height, int depth) {
     // x as width, y as height, z as depth
     int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -266,9 +269,9 @@ int main (void) {
         }
     }
 
-    cout << "finished" << endl;
+    // cout << "finished" << endl;
     
     cleanup(&data);
 
-    return 1;
+    return 0;
 }
