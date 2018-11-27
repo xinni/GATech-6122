@@ -131,7 +131,7 @@ __global__ void update_2D_kernel (float *dst, float *src, int width, int height,
     }
 }
 
-int main (void) {
+int main (int argc, char *argv[]) {
     DeviceData data;
 
     // set all value
@@ -140,7 +140,7 @@ int main (void) {
     int timeSteps, N, width, height, depth = 1;
     
     /*********************** read the config file *************************/
-    ifstream infile("sample.conf");
+    ifstream infile(argv[1]);
     string line;
     int index = 0;
     while (getline(infile, line)) {
