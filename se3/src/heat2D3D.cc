@@ -6,9 +6,15 @@
 #include <sstream>
 #include <fstream>
 
-#define threadNum = 12
+#define threadNum 8
 
 using namespace std;
+
+int head[threadNum];
+int tail[threadNum];
+float *previous;
+float *current;
+float *fix;
 
 struct DeviceData {
     float *d_fix;
@@ -49,11 +55,34 @@ void setInitHeatMap(float *dst, int width, int height, int depth, int location_x
 }
 
 /*************** copy src mat to dst mat **********************/
+void copy_const_kernel (int tid) {
+    for (int i = head[tid]; i <= tail[tid]; i++) {
+        if (fix[i] != 0) previous[i] = fix[i];
+    }
+}
 
 /****************** temp update function **********************/
+void update_kernel (int width, int height, int depth, float k, int tid) {
+    for (int index = head[tid]; index <= tail[tid]; index++) {
+        int left = index - 1;
+        int right = index + 1;
+        if (index % width == 0) left++;
+        if (index % width == width - 1) right--;
 
-void thread_task() {
-    std::cout << "hello thread" << std::endl;
+        int top = index - width;
+        int bottom = index + width;
+        if (index % (width * height) < width) top += width;
+        if ((width * height) - index % (width * height) < width) bottom -= width;
+    
+        // int front = index - width * height;
+        // int back = index + width * height;
+        // if (z == 0) front = front + width * height;
+        // if (z == depth - 1) back = back - width * height;
+        
+        current[index] = previous[index] + k * 
+            (previous[top] + previous[bottom] + previous[left] + previous[right] - previous[index] * 4);
+    
+    }
 }
 
 
@@ -63,7 +92,7 @@ int main(int argc, const char *argv[])
 
     // set all value
     bool dim2D = true; // true as 2D, false as 3D, default as 2D
-    float k, startTemp, *fix;
+    float k, startTemp;
     int timeSteps, N, width, height, depth = 1;
     
     /*********************** read the config file *************************/
@@ -131,11 +160,47 @@ int main(int argc, const char *argv[])
     }
     /*****************************************************************/
 
-    float previous[N];
-    float current[N] = {0};
+    // Define number of points (eachProcs) each procs should calculate
+	int eachThread = N / threadNum;
+	int lastThread = eachThread + (N % threadNum);
+
+	// Define two array to store the head and tail info for each rank
+	for (int i = 0; i < threadNum; i++) {
+		head[i] = i * eachThread;
+		if (i != threadNum - 1) {
+			tail[i] = head[i] + eachThread - 1;
+		} else {
+			tail[i] = head[i] + lastThread - 1;
+		}
+	}
+
+    previous = new float[N];
+    current = new float[N];
+    fill_n(current, N, 0);
     fill_n(previous, N, startTemp);
 
+    thread t[threadNum - 1];
+    for (int i = 0; i < threadNum - 1; i++) {
+        t[i] = thread(copy_const_kernel, i);
+    }
 
+    copy_const_kernel(threadNum - 1);
+
+    for (int i = 0; i < threadNum - 1; i++) {
+        t[i].join();
+    }
+
+    for (int i = 0; i < threadNum - 1; i++) {
+        t[i] = thread(update_kernel, width, height, depth, k, i);
+    }
+
+    update_kernel(width, height, depth, k, threadNum - 1);
+
+    for (int i = 0; i < threadNum - 1; i++) {
+        t[i].join();
+    }
+
+    cout << width << height << depth << k << threadNum << endl;
 
     for (int i = 0; i < N; i++) {
         if (i % (width * height) != width * height - 1) {
