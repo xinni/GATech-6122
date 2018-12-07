@@ -15,6 +15,8 @@ int tail[threadNum];
 float *previous;
 float *current;
 float *fix;
+int timeSteps, N, width, height, depth = 1;
+float k, startTemp;
 
 struct DeviceData {
     float *d_fix;
@@ -55,14 +57,14 @@ void setInitHeatMap(float *dst, int width, int height, int depth, int location_x
 }
 
 /*************** copy src mat to dst mat **********************/
-void copy_const_kernel (int tid) {
+void copy_const_kernel (float *dst, const float *src, int tid) {
     for (int i = head[tid]; i <= tail[tid]; i++) {
-        if (fix[i] != 0) previous[i] = fix[i];
+        if (src[i] != 0) dst[i] = src[i];
     }
 }
 
 /****************** temp update function **********************/
-void update_kernel (int width, int height, int depth, float k, int tid) {
+void update_kernel (float *dst, float *src, int tid) {
     for (int index = head[tid]; index <= tail[tid]; index++) {
         int left = index - 1;
         int right = index + 1;
@@ -72,16 +74,15 @@ void update_kernel (int width, int height, int depth, float k, int tid) {
         int top = index - width;
         int bottom = index + width;
         if (index % (width * height) < width) top += width;
-        if ((width * height) - index % (width * height) < width) bottom -= width;
+        if ((width * height) - index % (width * height) <= width) bottom -= width;
     
         // int front = index - width * height;
         // int back = index + width * height;
         // if (z == 0) front = front + width * height;
         // if (z == depth - 1) back = back - width * height;
         
-        current[index] = previous[index] + k * 
-            (previous[top] + previous[bottom] + previous[left] + previous[right] - previous[index] * 4);
-    
+        dst[index] = src[index] + k * 
+            (src[top] + src[bottom] + src[left] + src[right] - src[index] * 4);
     }
 }
 
@@ -92,8 +93,7 @@ int main(int argc, const char *argv[])
 
     // set all value
     bool dim2D = true; // true as 2D, false as 3D, default as 2D
-    float k, startTemp;
-    int timeSteps, N, width, height, depth = 1;
+
     
     /*********************** read the config file *************************/
     ifstream infile(argv[1]);
@@ -179,41 +179,59 @@ int main(int argc, const char *argv[])
     fill_n(current, N, 0);
     fill_n(previous, N, startTemp);
 
-    thread t[threadNum - 1];
-    for (int i = 0; i < threadNum - 1; i++) {
-        t[i] = thread(copy_const_kernel, i);
+    float *in = previous;
+    float *out = current;
+
+    //thread *t,*t2;
+    thread t[2 * timeSteps][threadNum - 1];
+
+    for (int j = 0; j <= timeSteps; j++) {
+        if (j % 2) {
+            in = current;
+            out = previous;
+        } else {
+            in = previous;
+            out = current;
+        }
+
+        // update values
+        //t[j] = new thread[threadNum - 1];
+        for (int i = 0; i < threadNum; i++) {
+            if (i == threadNum - 1) update_kernel(out, in, i);
+            else
+            t[j][i] = thread(update_kernel, out, in, i);
+            
+        }
+        for (int i = 0; i < threadNum - 1; i++) {
+            t[j][i].join();
+        }
+
+        // copy const value
+        //t[2*j] = new thread[threadNum - 1];
+        for (int i = 0; i < threadNum; i++) {
+            if (i == threadNum - 1) copy_const_kernel(out, fix, i);
+            else
+            t[2*j][i] = thread(copy_const_kernel, out, fix, i);
+            
+        }
+        for (int i = 0; i < threadNum - 1; i++) {
+            t[2*j][i].join();
+        }
+
     }
-
-    copy_const_kernel(threadNum - 1);
-
-    for (int i = 0; i < threadNum - 1; i++) {
-        t[i].join();
-    }
-
-    for (int i = 0; i < threadNum - 1; i++) {
-        t[i] = thread(update_kernel, width, height, depth, k, i);
-    }
-
-    update_kernel(width, height, depth, k, threadNum - 1);
-
-    for (int i = 0; i < threadNum - 1; i++) {
-        t[i].join();
-    }
-
-    cout << width << height << depth << k << threadNum << endl;
 
     for (int i = 0; i < N; i++) {
         if (i % (width * height) != width * height - 1) {
             if (i % width != width - 1) {
-                cout << current[i] << ", ";
+                cout << out[i] << ", ";
             } else {
-                cout << current[i] << endl;
+                cout << out[i] << endl;
             }
         } else {
             if (i == N - 1) {
-                cout << current[i] << endl;
+                cout << out[i] << endl;
             } else {
-                cout << current[i] << endl << endl;
+                cout << out[i] << endl << endl;
             }
         }
     }
