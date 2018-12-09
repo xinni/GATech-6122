@@ -9,7 +9,7 @@ cuda_add_executable(
     fft2d
     src/fft2d.cu
     src/complex.h
-    src/complex.cc
+    src/complex.cu
     src/input_image.cc
     src/input_image.h
 
