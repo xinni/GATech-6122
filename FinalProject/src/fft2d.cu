@@ -93,9 +93,24 @@ public:
         data = new Complex[w * h];
         for(int r = 0; r < h; ++r) {
             for(int c = 0; c < w; ++c) {
-                float real;
-                ifs >> real;
-                data[r * w + c] = Complex(real);
+                // float real;
+                // ifs >> real;
+                // data[r * w + c] = Complex(real);
+                string word;
+                ifs >> word;
+                int found = word.find_first_not_of(" \t");
+                if (word[found] == '(') {
+                    istringstream iss(word);
+                    char temp;
+                    float real, imag;
+                    iss >> temp >> real >> temp >> imag >> temp;
+                    data[r * w + c] = Complex(real, imag);
+                } else {
+                    istringstream iss(word);
+                    float real;
+                    iss >> real;
+                    data[r * w + c] = Complex(real);
+                }
             }
         }
     }
@@ -166,7 +181,7 @@ void cleanup(DeviceData *d) {
     cudaFree(d->d_res);
 }
 
-/*************** transform by row **********************/
+/*************** forward transform by row **********************/
 __global__ void transByRow (Complex* dst, Complex* src, int width, int height) {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -176,8 +191,6 @@ __global__ void transByRow (Complex* dst, Complex* src, int width, int height) {
         for (int i = 0; i < width; i++) {
             float re = (src + y*width + i)->real;
             float im = (src + y*width + i)->imag;
-            // (dst + index)->real += re * cos((2*PI*x*i)/width) + im*sin(2*PI*i*x/width);
-            // (dst + index)->imag += -re * sin((2*PI*x*i)/width) + im*cos(2*PI*i*x/width);
             Complex w = Complex(cos(2*PI*i*x/width), -sin(2*PI*i*x/width));
             (dst + index)->real += re * w.real - im*w.imag;
             (dst + index)->imag += re * w.imag + im*w.real;
@@ -185,7 +198,7 @@ __global__ void transByRow (Complex* dst, Complex* src, int width, int height) {
     }
 }
 
-/*************** transform by column **********************/
+/*************** forward transform by column **********************/
 __global__ void transByCol (Complex* dst, Complex* src, int width, int height) {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -202,18 +215,48 @@ __global__ void transByCol (Complex* dst, Complex* src, int width, int height) {
     }
 }
 
+/*************** reverse transform by row **********************/
+__global__ void revByRow (Complex* dst, Complex* src, int width, int height) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * width;
+
+    if (x < width && y < height) {
+        for (int i = 0; i < width; i++) {
+            float re = (src + y*width + i)->real;
+            float im = (src + y*width + i)->imag;
+            Complex w = Complex(cos(2*PI*i*x/width), sin(2*PI*i*x/width));
+            (dst + index)->real += (re * w.real - im*w.imag)/width;
+            (dst + index)->imag += (re * w.imag + im*w.real)/width;
+        }
+    }
+}
+
+/*************** reverse transform by column **********************/
+__global__ void revByCol (Complex* dst, Complex* src, int width, int height) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * width;
+
+    if (x < width && y < height) {
+        for (int i = 0; i < height; i++) {
+            float re = (src + x + i*width)->real;
+            float im = (src + x + i*width)->imag;
+            Complex w = Complex(cos(2*PI*i*y/height), sin(2*PI*i*y/height));
+            (dst + index)->real += (re * w.real - im*w.imag)/height;
+            (dst + index)->imag += (re * w.imag + im*w.real)/height;
+        }
+    }
+}
+
+
 int main (int argc, char* argv[]) {
     DeviceData devs;
 
-    std::string str = "test.txt";
-    const char* inFile = str.c_str();
-    str = "res.txt";
-    const char* outFile = str.c_str();
-
-    if (argc > 1) {
-        inFile = argv[1];
-        outFile = argv[2];
-    }
+    string str = "forward";
+    bool forward = (strcmp(argv[1], str.c_str()) == 0 );
+    char* inFile = argv[2];
+    char* outFile = argv[3];
 
     InputImage image(inFile);
     int height = image.get_height();
@@ -228,19 +271,26 @@ int main (int argc, char* argv[]) {
     cudaMalloc((void**)&devs.d_data, N * sizeof(Complex));
     cudaMalloc((void**)&devs.d_res, N * sizeof(Complex));
     cudaMalloc((void**)&devs.d_temp, N * sizeof(Complex));
-
     cudaMemcpy(devs.d_data, data, N * sizeof(Complex), cudaMemcpyHostToDevice);
 
     dim3 blocks((width + DIM - 1) / DIM, (height + DIM - 1) / DIM);
     dim3 threads(DIM, DIM);
+    cout << width << ", " << height << forward << endl;
 
-    cout << width << ", " << height << endl;
+    if (forward) {
+        transByRow<<<blocks, threads>>>(devs.d_temp, devs.d_data, width, height);
+        transByCol<<<blocks, threads>>>(devs.d_res, devs.d_temp, width, height);
 
-    transByRow<<<blocks, threads>>>(devs.d_temp, devs.d_data, width, height);
-    transByCol<<<blocks, threads>>>(devs.d_res, devs.d_temp, width, height);
+        cudaMemcpy(res, devs.d_res, N*sizeof(Complex), cudaMemcpyDeviceToHost);
+        image.save_image_data(outFile, res, width, height);
 
-    cudaMemcpy(res, devs.d_res, N*sizeof(Complex), cudaMemcpyDeviceToHost);
-    image.save_image_data(outFile, res, width, height);
+    } else {
+        revByRow<<<blocks, threads>>>(devs.d_temp, devs.d_data, width, height);
+        revByCol<<<blocks, threads>>>(devs.d_res, devs.d_temp, width, height);
+
+        cudaMemcpy(res, devs.d_res, N*sizeof(Complex), cudaMemcpyDeviceToHost);
+        image.save_image_data_real(outFile, res, width, height);
+    }
 
     cleanup(&devs);
 
