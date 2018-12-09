@@ -24,24 +24,24 @@ using namespace std;
 //     }
 // }
 
-int main (int argc, char *argv[]) {
-    string inFile("Tower256.txt");
-    string outFile("Mytest.txt");
+int main (int argc, char* argv[]) {
+    char* inFile="Tower256.txt";
+    char* outFile="Mytest.txt";
 
     if (argc > 1) {
-        inFile = string(argv[1]);
-        outFile = string(argv[2]);
+        inFile = argv[1];
+        outFile = argv[2];
     }
 
-    // input_image image(inFile);
-    // int height = inFile.get_height();
-    // int width = inFile.get_width();
-    // int N = height * width;
+    InputImage image(inFile);
+    int height = image.get_height();
+    int width = image.get_width();
+    int N = height * width;
 
-    // complex data[N];
-    // complex res[N];
+    Complex src[N];
+    Complex res[N];
     
-    // data = inFile.get_image_data();
+    Complex* data = image.get_image_data();
 
     return 0;
 }

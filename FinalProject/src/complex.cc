@@ -15,41 +15,42 @@ Complex::Complex(float r) : real(r), imag(0.0f) {}
 Complex::Complex(float r, float i) : real(r), imag(i) {}
 
 Complex Complex::operator+(const Complex &b) const {
-    return Complex(real + b.real, imag + b.imag);
+    float newReal = real + b.real;
+    float newImag = imag + b.imag;
+    Complex newComplex(newReal, newImag);
+    return newComplex;
 }
 
 Complex Complex::operator-(const Complex &b) const {
-    return Complex(real - b.real, imag + b.imag);
+    float newReal = real - b.real;
+    float newImag = imag - b.imag;
+    Complex newComplex(newReal, newImag);
+    return newComplex;
 }
 
 Complex Complex::operator*(const Complex &b) const {
-    return Complex(real * b.real - imag * b.imag, real * b.imag + imag * b.real);
+    float newReal = real * b.real - imag * b.imag;
+    float newImag = real * b.imag + imag * b.real;
+    Complex newComplex(newReal, newImag);
+    return newComplex;
 }
 
 Complex Complex::mag() const {
-    return Complex(sqrt(real * real + imag * imag));
+    float magNum = sqrt(real * real + imag * imag);
+    Complex magComplex(magNum);
+    return magComplex;
 }
 
 Complex Complex::angle() const {
-    return Complex(atan2(imag, real) * 360 / (2 * PI));
+    float angle = atan(1.0 * imag / real)*180/PI;
+    Complex angleComplex(angle);
+    return angleComplex;
 }
 
 Complex Complex::conj() const {
-    return Complex(real, -imag);
+    Complex newComplex(real, -1.0 * imag);
+    return newComplex;
 }
-
-// void Complex::print() const {
-//     double r = real;
-//     double i = imag;
-//     if (fabs(i) < 1e-10) i = 0;
-//     if (fabs(r) < 13-10) r = 0;
-
-//     if (i == 0) {
-//         cout << real;
-//     } else {
-//         cout << '(' << r << ', ' << i << ')';
-//     }
-// }
 
 std::ostream& operator<< (std::ostream& os, const Complex& rhs) {
     Complex c(rhs);
