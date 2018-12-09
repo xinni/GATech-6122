@@ -4,14 +4,155 @@
 #include <stdlib.h>
 #include <math.h>
 #include <cuda.h>
-#include "complex.h"
-#include "input_image.h"
+#include <cmath>
+#include <fstream>
+#include <sstream>
 
 #define DIM 32
 
 const float PI = 3.14159265358979f;
 
 using namespace std;
+
+/*************************************************/
+class Complex {
+public:
+    __host__ __device__ Complex() : real(0.0f), imag(0.0f) {}
+    
+    __host__ __device__ Complex(float r) : real(r), imag(0.0f) {}
+    
+    __host__ __device__ Complex(float r, float i) : real(r), imag(i) {}
+    
+    __host__ __device__ Complex operator+(const Complex &b) const {
+        float newReal = real + b.real;
+        float newImag = imag + b.imag;
+        Complex newComplex(newReal, newImag);
+        return newComplex;
+    }
+    
+    __host__ __device__ Complex operator-(const Complex &b) const {
+        float newReal = real - b.real;
+        float newImag = imag - b.imag;
+        Complex newComplex(newReal, newImag);
+        return newComplex;
+    }
+    
+    __host__ __device__ Complex operator*(const Complex &b) const {
+        float newReal = real * b.real - imag * b.imag;
+        float newImag = real * b.imag + imag * b.real;
+        Complex newComplex(newReal, newImag);
+        return newComplex;
+    }
+    
+    __host__ __device__ Complex mag() const {
+        float magNum = sqrt(real * real + imag * imag);
+        Complex magComplex(magNum);
+        return magComplex;
+    }
+    
+    __host__ __device__ Complex angle() const {
+        float angle = atan(1.0 * imag / real)*180/PI;
+        Complex angleComplex(angle);
+        return angleComplex;
+    }
+    
+    __host__ __device__ Complex conj() const {
+        Complex newComplex(real, -1.0 * imag);
+        return newComplex;
+    }
+
+    float real;
+    float imag;
+};
+
+std::ostream& operator<< (std::ostream& os, const Complex& rhs) {
+    Complex c(rhs);
+    if(fabsf(rhs.imag) < 1e-10) c.imag = 0.0f;
+    if(fabsf(rhs.real) < 1e-10) c.real = 0.0f;
+
+    if(c.imag == 0) {
+        os << c.real;
+    }
+    else {
+        os << "(" << c.real << "," << c.imag << ")";
+    }
+    return os;
+}
+
+class InputImage {
+public:
+
+    InputImage(const char* filename){
+        std::ifstream ifs(filename);
+        if(!ifs) {
+            std::cout << "Can't open image file " << filename << std::endl;
+            exit(1);
+        }
+    
+        ifs >> w >> h;
+        data = new Complex[w * h];
+        for(int r = 0; r < h; ++r) {
+            for(int c = 0; c < w; ++c) {
+                float real;
+                ifs >> real;
+                data[r * w + c] = Complex(real);
+            }
+        }
+    }
+    int get_width() const{
+        return w;
+    }
+    int get_height() const{
+        return h;
+    }
+
+    //returns a pointer to the image data.  Note the return is a 1D
+    //array which represents a 2D image.  The data for row 1 is
+    //immediately following the data for row 0 in the 1D array
+    Complex* get_image_data() const{
+        return data;
+    }
+    //use this to save output from forward DFT
+    void save_image_data(const char* filename, Complex* d, int w, int h){
+        std::ofstream ofs(filename);
+        if(!ofs) {
+            std::cout << "Can't create output image " << filename << std::endl;
+            return;
+        }
+    
+        ofs << w << " " << h << std::endl;
+    
+        for(int r = 0; r < h; ++r) {
+            for(int c = 0; c < w; ++c) {
+                ofs << d[r * w + c] << " ";
+            }
+            ofs << std::endl;
+        }
+    }
+    //use this to save output from reverse DFT
+    void save_image_data_real(const char* filename, Complex* d, int w, int h){
+        std::ofstream ofs(filename);
+        if(!ofs) {
+            std::cout << "Can't create output image " << filename << std::endl;
+            return;
+        }
+    
+        ofs << w << " " << h << std::endl;
+    
+        for (int r = 0; r < h; ++r) {
+            for (int c = 0; c < w; ++c) {
+                ofs << d[r * w + c].real << " ";
+            }
+            ofs << std::endl;
+        }
+    }
+
+private:
+    int w;
+    int h;
+    Complex* data;
+};
+/*************************************************/
 
 struct DeviceData {
     Complex *d_data;
@@ -30,12 +171,11 @@ __global__ void transByRow (Complex* dst, Complex* src, int width, int height) {
     int index = x + y * width;
 
     if (x < width && y < height) {
-        dst[index] = 3;
-        // for (int i = 0; i < width; i++) {
-        //     // (dst + index)->real += ((src + i)->real * cos((2*PI*index*i) / width))/width;
-        //     // (dst + index)->imag += -((src + i)->real * sin((2*PI*index*i) / width))/width;
-        //     dst[index] = 3;
-        // }
+        for (int i = 0; i < width; i++) {
+            (dst + index)->real += ((src + i)->real * cos((2*PI*index*i) / width))/width;
+            (dst + index)->imag += -((src + i)->real * sin((2*PI*index*i) / width))/width;
+            // dst[index] = 3;
+        }
     }
 }
 
@@ -75,7 +215,7 @@ int main (int argc, char* argv[]) {
 
     cudaMemcpy(res, devs.d_res, N*sizeof(Complex), cudaMemcpyDeviceToHost);
 
-    image.save_image_data("MyAfter2D.txt", res, width, height);
+    image.save_image_data(outFile, res, width, height);
 
     cleanup(&devs);
 
