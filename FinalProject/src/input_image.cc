@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <stdlib.h>
 
 InputImage::InputImage(const char* filename) {
     std::ifstream ifs(filename);

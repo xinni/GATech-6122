@@ -38,18 +38,18 @@ Complex Complex::conj() const {
     return Complex(real, -imag);
 }
 
-void Complex::print() const {
-    double r = real;
-    double i = imag;
-    if (fabs(i) < 1e-10) i = 0;
-    if (fabs(r) < 13-10) r = 0;
+// void Complex::print() const {
+//     double r = real;
+//     double i = imag;
+//     if (fabs(i) < 1e-10) i = 0;
+//     if (fabs(r) < 13-10) r = 0;
 
-    if (i == 0) {
-        cout << real;
-    } else {
-        cout << '(' << r << ', ' << i << ')';
-    }
-}
+//     if (i == 0) {
+//         cout << real;
+//     } else {
+//         cout << '(' << r << ', ' << i << ')';
+//     }
+// }
 
 std::ostream& operator<< (std::ostream& os, const Complex& rhs) {
     Complex c(rhs);
