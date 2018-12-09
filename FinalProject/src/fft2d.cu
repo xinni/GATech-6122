@@ -156,11 +156,13 @@ private:
 
 struct DeviceData {
     Complex *d_data;
+    Complex *d_temp;
     Complex *d_res;
 };
 
 void cleanup(DeviceData *d) {
     cudaFree(d->d_data);
+    cudaFree(d->d_temp);
     cudaFree(d->d_res);
 }
 
@@ -172,9 +174,30 @@ __global__ void transByRow (Complex* dst, Complex* src, int width, int height) {
 
     if (x < width && y < height) {
         for (int i = 0; i < width; i++) {
-            (dst + index)->real += ((src + i)->real * cos((2*PI*index*i) / width))/width;
-            (dst + index)->imag += -((src + i)->real * sin((2*PI*index*i) / width))/width;
-            // dst[index] = 3;
+            float re = (src + y*width + i)->real;
+            float im = (src + y*width + i)->imag;
+            // (dst + index)->real += re * cos((2*PI*x*i)/width) + im*sin(2*PI*i*x/width);
+            // (dst + index)->imag += -re * sin((2*PI*x*i)/width) + im*cos(2*PI*i*x/width);
+            Complex w = Complex(cos(2*PI*i*x/width), -sin(2*PI*i*x/width));
+            (dst + index)->real += re * w.real - im*w.imag;
+            (dst + index)->imag += re * w.imag + im*w.real;
+        }
+    }
+}
+
+/*************** transform by column **********************/
+__global__ void transByCol (Complex* dst, Complex* src, int width, int height) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+    int index = x + y * width;
+
+    if (x < width && y < height) {
+        for (int i = 0; i < height; i++) {
+            float re = (src + x + i*width)->real;
+            float im = (src + x + i*width)->imag;
+            Complex w = Complex(cos(2*PI*i*y/height), -sin(2*PI*i*y/height));
+            (dst + index)->real += re * w.real - im*w.imag;
+            (dst + index)->imag += re * w.imag + im*w.real;
         }
     }
 }
@@ -182,8 +205,10 @@ __global__ void transByRow (Complex* dst, Complex* src, int width, int height) {
 int main (int argc, char* argv[]) {
     DeviceData devs;
 
-    char* inFile="Tower256.txt";
-    char* outFile="Mytest.txt";
+    std::string str = "test.txt";
+    const char* inFile = str.c_str();
+    str = "res.txt";
+    const char* outFile = str.c_str();
 
     if (argc > 1) {
         inFile = argv[1];
@@ -195,7 +220,6 @@ int main (int argc, char* argv[]) {
     int width = image.get_width();
     int N = height * width;
 
-    // Complex src[N];
     Complex res[N];
     fill_n(res, N, 1);
 
@@ -203,6 +227,7 @@ int main (int argc, char* argv[]) {
 
     cudaMalloc((void**)&devs.d_data, N * sizeof(Complex));
     cudaMalloc((void**)&devs.d_res, N * sizeof(Complex));
+    cudaMalloc((void**)&devs.d_temp, N * sizeof(Complex));
 
     cudaMemcpy(devs.d_data, data, N * sizeof(Complex), cudaMemcpyHostToDevice);
 
@@ -211,10 +236,10 @@ int main (int argc, char* argv[]) {
 
     cout << width << ", " << height << endl;
 
-    transByRow<<<blocks, threads>>>(devs.d_res, devs.d_data, width, height);
+    transByRow<<<blocks, threads>>>(devs.d_temp, devs.d_data, width, height);
+    transByCol<<<blocks, threads>>>(devs.d_res, devs.d_temp, width, height);
 
     cudaMemcpy(res, devs.d_res, N*sizeof(Complex), cudaMemcpyDeviceToHost);
-
     image.save_image_data(outFile, res, width, height);
 
     cleanup(&devs);
